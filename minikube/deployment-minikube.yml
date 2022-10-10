@@ -1,0 +1,203 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dotnet-worker
+  labels:
+    name: dotnet-worker
+spec:
+  selector:
+    matchLabels:
+      name: dotnet-worker
+  template:
+    metadata:
+      labels:
+        name: dotnet-worker
+    spec:
+      containers:
+        - name: dotnet-worker
+          image: dotnet-worker:0.3
+          imagePullPolicy: Never
+          env:
+          - name: WS_SITE
+            value: "dotnet-webapp-headless"
+          - name: WS_PORT
+            value: "80"
+          - name: DB_HOST
+            value: "dotnet-pg"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dotnet-webapp
+  labels:
+    name: dotnet-webapp
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      name: dotnet-webapp
+  template:
+    metadata:
+      labels:
+        name: dotnet-webapp
+    spec:
+      containers:
+        - name: dotnet-webapp
+          image: dotnet-webapp:0.4
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dotnet-webapp
+  labels:
+    run: dotnet-webapp
+spec:
+  ports:
+  - name: default
+    protocol: TCP
+    port: 80
+    targetPort: 80
+  selector:
+    name: dotnet-webapp
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dotnet-webapp-headless
+  labels:
+    run: dotnet-webapp-headless
+spec:
+  clusterIP: None
+  ports:
+  - name: default
+    protocol: TCP
+    port: 80
+    targetPort: 80
+  selector:
+    name: dotnet-webapp
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dotnet-pg
+  labels:
+    name: dotnet-pg
+spec:
+  selector:
+    matchLabels:
+      name: dotnet-pg
+  template:
+    metadata:
+      labels:
+        name: dotnet-pg
+    spec:
+      containers:
+        - name: db
+          image: postgres:14.5-alpine
+          imagePullPolicy: "IfNotPresent"
+          ports:
+            - containerPort: 5432  # Exposes container port
+          envFrom:
+            - configMapRef:
+                name: postgres-config
+          volumeMounts:
+            - mountPath: /var/lib/postgresql/data
+              name: postgredb
+      volumes:
+        - name: postgredb
+          persistentVolumeClaim:
+            claimName: postgres-pv-claim
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dotnet-pg
+  labels:
+    run: dotnet-pg
+spec:
+  ports:
+  - name: default
+    protocol: TCP
+    port: 5432
+    targetPort: 5432
+  selector:
+    name: dotnet-pg
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dotnet-pg-adminer
+  labels:
+    name: dotnet-pg-adminer
+spec:
+  selector:
+    matchLabels:
+      name: dotnet-pg-adminer
+  template:
+    metadata:
+      labels:
+        name: dotnet-pg-adminer
+    spec:
+      containers:
+        - name: adminer
+          image: adminer
+          ports:
+            - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dotnet-pg-adminer-svc
+  labels:
+    run: dotnet-pg-adminer-svc
+spec:
+  ports:
+  - name: default
+    protocol: TCP
+    port: 8080
+    targetPort: 8080
+  selector:
+    name: dotnet-pg-adminer
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: adminer-ingress
+spec:
+  rules:
+  - host: minikube-adminer
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: dotnet-pg-adminer-svc
+            port: 
+              number: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dotnet-webapp
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/affinity: cookie
+    nginx.ingress.kubernetes.io/session-cookie-hash: sha1
+    nginx.ingress.kubernetes.io/session-cookie-name: REALTIMESERVERID
+spec:
+  rules:
+  - host: dotnet-webapp
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: dotnet-webapp
+            port: 
+              number: 80
